@@ -214,10 +214,22 @@
  */
 const SUPABASE_URL = "https://tjvlnxfhptcubnohvaxn.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_a-swOzsSKiBKxubugHJvJg_011pXG4B";
-const supabaseClient = window.supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEY
-);
+let supabaseClient = null;
+
+function initSupabase(){
+  const ready = SUPABASE_URL && !SUPABASE_URL.startsWith('YOUR_') &&
+                SUPABASE_PUBLISHABLE_KEY && !SUPABASE_PUBLISHABLE_KEY.startsWith('YOUR_');
+  if(!ready || !window.supabase) return false;
+  try{
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    return true;
+  }catch(e){
+    console.error('QuizBIT: Supabase init failed', e);
+    supabaseClient = null;
+    return false;
+  }
+}
+initSupabase();
 </script>
 
 </head>
@@ -292,9 +304,7 @@ create table if not exists public.attempts (
   completed boolean not null default false,
   started_at timestamptz not null default now(),
   completed_at timestamptz
-);
-
-create table if not exists public.attempt_answers (
+);create table if not exists public.attempt_answers (
   id uuid primary key default gen_random_uuid(),
   attempt_id uuid not null references public.attempts(id) on delete cascade,
   question_id uuid not null references public.questions(id) on delete cascade,
@@ -341,7 +351,10 @@ create table if not exists public.analytics_events (
 
 -- IMPORTANT: enable RLS and write explicit policies before production.
 -- The frontend must never use the service-role/secret key.
-============/* ===================== STORAGE ===================== */
+======================================================================
+*/
+
+/* ===================== STORAGE ===================== */
 /* Owner access is handled by Supabase Auth; no PIN is stored in frontend code. */
 let DB = { tests: [], settings: { homeAd:{}, resultsAd:{} }, analytics:{ affiliateClicks:{home:0,results:0}, retention:[] } };
 let sessionStart = Date.now();
@@ -605,8 +618,7 @@ async function renderQBCohorts(){
           data.map(c=>`<div class="qb-v2-cohort" onclick="qbSelectCohort('${c.id}')"><h3>${qbEscape(c.name)}</h3><div class="qb-v2-muted">${qbEscape(c.category||'Government exam')}</div><p style="margin-top:8px;color:var(--text-dim);font-size:13px">${qbEscape(c.description||'')}</p></div>`).join('') ||
           `<div class="center-empty">No active exam cohorts yet.</div>`}
       </div>
-    </section>`;
-  await qbTrack('cohort_directory_view');
+    </section>`;  await qbTrack('cohort_directory_view');
 }
 
 async function qbSearchCohortUI(){
@@ -696,7 +708,10 @@ async function qbBootV2(){
     return false;
   }
   if(await qbRouteAdmin()) return true;
-  return false;window.addEventListener('DOMContentLoaded',()=>{
+  return false;
+}
+
+window.addEventListener('DOMContentLoaded',()=>{
   setTimeout(()=>qbBootV2(),0);
 });
 
@@ -704,7 +719,7 @@ async function qbBootV2(){
 function go(view){ VIEW = view; render(); window.scrollTo(0,0); }
 function render(){
   if(VIEW.name==='home') return renderHome();
-  if(VIEW.name==='ownerDash') return renderOwnerDash();
+    if(VIEW.name==='ownerDash') return renderOwnerDash();
   if(VIEW.name==='username') return renderUsername();
   if(VIEW.name==='instructions') return renderInstructions();
   if(VIEW.name==='taking') return renderTaking();
@@ -736,6 +751,7 @@ renderHome = async function(){
   }
   await qbTrack('home_view');
 };
+
 async function qbHomeSearch(){
   const term=document.getElementById('qb-home-search')?.value.trim();
   if(!term){go({name:'cohorts'});return;}
@@ -816,7 +832,7 @@ async function trackClick(kind, link){
   window.open(link, '_blank');
 }
 
-/* Legacy owner PIN login removed. Admin authentication is handled by Supabase Auth. */
+/* Legacy owner PIN login removed. */
 
 /* ===================== OWNER DASHBOARD ===================== */
 let draft = null; // draft test being built/edited
@@ -898,8 +914,7 @@ function ownerCreateHtml(){
       <div style="font-size:10.5px;color:var(--text-faint);text-transform:uppercase;">Min %</div>
       <div style="font-size:10.5px;color:var(--text-faint);text-transform:uppercase;">Max %</div>
       <div style="font-size:10.5px;color:var(--text-faint);text-transform:uppercase;">Heading / Message</div>
-    </div>
-    ${t.thresholds.map((th,i)=>`
+    </div>    ${t.thresholds.map((th,i)=>`
       <div class="thresh-row">
         <div style="padding-top:8px; font-size:13px; text-transform:capitalize; color:var(--gold);">${th.key}</div>
         <input class="subtle-input" type="number" value="${th.min}" oninput="draft.thresholds[${i}].min=Number(this.value)">
@@ -961,11 +976,13 @@ function addQuestion(){
   toast('Question added');
 }
 function removeQuestion(i){ draft.questions.splice(i,1); go({name:'ownerDash',tab:'create'}); }
+
 async function saveDraft(){
   if(!draft.title.trim()){ toast('Give the test a title'); return; }
   if(!draft.questions.length){ toast('Add at least one question'); return; }
   const idx = DB.tests.findIndex(x=>x.id===draft.id);
-  if(idx>=0) DB.tests[idx] = draft; else DB.tests.push(draft);
+  if(idx>=0) DB.tests[idx] = draft;
+  else DB.tests.push(draft);
   await saveTests();
   toast('Test saved');
   draft = blankTest();
@@ -1081,5 +1098,202 @@ function renderUsername(){
       <div class="eyebrow">Before You Start</div>
       <h1 class="hero" style="font-size:28px;">What should we call you?</h1>
       <p class="lede" style="margin:0 auto 26px;">This is only used to greet you on your results page — nothing else. No account, no login.</p>
-      <div class="fie
+      <div class="field"><input id="unameInput" placeholder="Your name" style="text-align:center; font-size:18px; border-bottom:1px solid var(--line);"></div>
+      <button class="btn btn-solid" style="margin-top:12px;" onclick="confirmUsername()">Continue</button>
+      <div style="margin-top:22px;"><a onclick="go({name:'home'})" style="font-size:12px;color:var(--text-faint);cursor:pointer;">&larr; Back to tests</a></div>
+    </section>
+  `;
+  setTimeout(()=>document.getElementById('unameInput')?.focus(), 50);
+}
+function confirmUsername(){
+  const v = document.getElementById('unameInput').value.trim();
+  if(!v){ toast('Please enter a name'); return; }
+  session.name = v;
+  go({name:'instructions'});
+}
+function renderInstructions(){
+  const t = session.test;
+  root.innerHTML = `
+    ${headerHtml()}
+    <section style="padding-top:34px;">
+      <div class="breadcrumb" onclick="go({name:'home'})">&larr; Back to tests</div>
+      <div class="eyebrow">Instructions</div>
+      <h1 class="hero" style="font-size:28px;">${esc(t.title)}</h1>
+    </section>
+    <hr class="sep-soft">
+    <section>
+      <div class="eyebrow">Test Information</div>
+      <p class="lede" style="white-space:pre-wrap;">${esc(t.instructions) || 'No additional instructions provided.'}</p>
+      <div class="test-meta" style="margin-top:14px;"><span>${t.questions.length} Questions</span><span>${t.durationMins} minutes</span><span>Full marks ${fullMarks(t)}</span></div>
+    </section>
+    <hr class="sep-soft">
+    <section>
+      <div class="eyebrow">Marking Scheme</div>
+      <p class="lede" style="white-space:pre-wrap;">${esc(t.markingSchemeText) || ('+' + t.marksCorrect + ' for each correct answer, ' + t.marksWrong + ' for each wrong answer, ' + t.marksUnattempted + ' for unattempted questions.')}</p>
+    </section>
+    <hr class="sep-soft">
+    <section>
+      <div class="eyebrow">Syllabus</div>
+      <p class="lede" style="white-space:pre-wrap;">${esc(t.syllabus) || 'Not specified.'}</p>
+    </section>
+    <hr class="sep">
+    <section style="text-align:center; padding:10px 0 40px;">
+      <button class="btn btn-solid" onclick="beginTest()">Start Test — ${session.name}</button>
+    </section>
+  `;
+}
+function beginTest(){
+  session.startTs = Date.now();
+  session.remaining = session.test.durationMins*60;
+  go({name:'taking'});
+  session.timerHandle = setInterval(tick, 1000);
+}
+function tick(){
+  session.remaining--;
+  const el = document.getElementById('timerVal');
+  if(!el){ clearInterval(session.timerHandle); return; }
+  el.textContent = fmtTime(session.remaining);
+  if(session.remaining<=60) el.classList.add('low');
+  if(session.remaining<=0){ clearInterval(session.timerHandle); submitTest(true); }
+}
+function fmtTime(s){ s=Math.max(0,s); const m=Math.floor(s/60), sec=s%60; return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'); }
+
+function renderTaking(){
+  const t = session.test;
+  const q = t.questions[session.current];
+  root.innerHTML = `
+    <div class="test-header">
+      <div class="test-header-top">
+        <div class="brand" style="font-size:19px;">Quiz<span class="dot">BIT</span></div>
+        <div class="timer" id="timerVal">${fmtTime(session.remaining)}</div>
+      </div>
+      <div class="qgrid">
+        ${t.questions.map((qq,i)=>`<div class="qchip ${session.answers[qq.id]!==undefined?'attempted':''} ${i===session.current?'current':''}" onclick="jumpTo(${i})">${i+1}</div>`).join('')}
+      </div>
+    </div>
+    <div class="qbody">
+      <div class="eyebrow">Question ${session.current+1} of ${t.questions.length}</div>
+      <div class="qtext">${esc(q.text)}</div>
+      <div class="optlist">
+        ${q.options.map((o,oi)=>`
+          <div class="optrow ${session.answers[q.id]===oi?'selected':''}" onclick="selectOpt('${q.id}',${oi})">
+            <div class="optletter">${'ABCD'[oi]}</div>
+            <div class="opttext">${esc(o)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="test-nav">
+        <button class="btn btn-ghost btn-sm" onclick="prevQ()" ${session.current===0?'disabled':''}>&larr; Previous</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearAns('${q.id}')">Clear Response</button>
+        ${session.current===t.questions.length-1
+          ? `<button class="btn btn-solid btn-sm" onclick="confirmSubmit()">Submit Test</button>`
+          : `<button class="btn btn-sm" onclick="nextQ()">Next &rarr;</button>`}
+      </div>
+    </div>
+  `;
+}
+function selectOpt(qid, oi){ session.answers[qid]=oi; renderTakingKeepTimer(); }
+function clearAns(qid){ delete session.answers[qid]; renderTakingKeepTimer(); }
+function jumpTo(i){ session.current=i; renderTakingKeepTimer(); }
+function nextQ(){ if(session.current<session.test.questions.length-1) session.current++; renderTakingKeepTimer(); }
+function prevQ(){ if(session.current>0) session.current--; renderTakingKeepTimer(); }
+function renderTakingKeepTimer(){ renderTaking(); }
+function confirmSubmit(){
+  const total = session.test.questions.length;
+  const answered = Object.keys(session.answers).length;
+  const msg = answered<total ? `You've attempted ${answered} of ${total}. Submit anyway?` : 'Submit your test now?';
+  if(confirm(msg)) submitTest(false);
+}
+async function submitTest(auto){
+  clearInterval(session.timerHandle);
+  const t = session.test;
+  let score = 0;
+  for(const q of t.questions){
+    const a = session.answers[q.id];
+    if(a===undefined) score += Number(t.marksUnattempted)||0;
+    else if(a===q.correct) score += Number(t.marksCorrect)||0;
+    else score += Number(t.marksWrong)||0;
   }
+  score = Math.round(score*100)/100;
+  const timeTakenSec = Math.round((Date.now()-session.startTs)/1000);
+  const results = await getResults(t.id);
+  results.push({name:session.name, score, timeTakenSec, ts:Date.now()});
+  await saveResults(t.id, results);
+  session.finalScore = score;
+  session.allResults = results;
+  go({name:'results'});
+}
+
+/* ===================== RESULTS ===================== */
+function renderResults(){
+  const t = session.test;
+  const full = fullMarks(t);
+  const pct = full>0 ? (session.finalScore/full)*100 : 0;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const band = pickBand(t, pct);
+  const sorted = [...session.allResults].sort((a,b)=> b.score-a.score || a.timeTakenSec-b.timeTakenSec);
+  const rank = sorted.findIndex(r=> r.ts===undefined ? false : (r.name===session.name && r.score===session.finalScore && r.timeTakenSec===session.allResults[session.allResults.length-1].timeTakenSec)) ;
+  const myRank = sorted.findIndex(r => r === session.allResults[session.allResults.length-1]) + 1;
+  const totalStudents = sorted.length;
+  const showName = myRank<=10;
+  const r = 54, circumference = 2*Math.PI*r;
+  const offset = circumference - (clamped/100)*circumference;
+  root.innerHTML = `
+    ${headerHtml()}
+    <section style="padding-top:20px;">
+      <div class="eyebrow" style="text-align:center;">${esc(t.title)} — Results</div>
+      <div class="ring-wrap">
+        <svg width="150" height="150" viewBox="0 0 150 150">
+          <circle cx="75" cy="75" r="${r}" stroke="rgba(201,162,39,0.15)" stroke-width="10" fill="none"/>
+          <circle cx="75" cy="75" r="${r}" stroke="url(#goldgrad)" stroke-width="10" fill="none"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 75 75)"/>
+          <defs><linearGradient id="goldgrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#c9a227"/><stop offset="100%" stop-color="#f0d17a"/>
+          </linearGradient></defs>
+          <text x="75" y="72" text-anchor="middle" class="ring-num">${session.finalScore}</text>
+          <text x="75" y="92" text-anchor="middle" class="ring-den">/ ${full}</text>
+        </svg>
+      </div>
+      <div class="greet-heading">${esc(band.heading)}</div>
+      <div class="greet-msg">${esc(band.message)}</div>
+      ${showName ? `<div style="text-align:center; margin-top:14px; color:var(--gold-bright); font-size:13px; letter-spacing:.5px;">🏆 ${esc(session.name)} — you're in the Top 10!</div>` : ''}
+      <div class="result-meta">
+        <div><div class="n">#${myRank}</div><div class="l">Your Rank</div></div>
+        <div><div class="n">${totalStudents}</div><div class="l">Total Attempts</div></div>
+        <div><div class="n">${clamped.toFixed(1)}%</div><div class="l">Percentage</div></div>
+      </div>
+    </section>
+    <hr class="sep">
+    <section>
+      ${adBlockHtml(DB.settings.resultsAd, 'results')}
+    </section>
+    <hr class="sep">
+    <section style="text-align:center; padding-bottom:30px;">
+      <button class="btn btn-ghost" onclick="session=null; go({name:'home'})">Back to All Tests</button>
+    </section>
+  `;
+}
+function pickBand(t, pct){
+  const sorted = [...t.thresholds].sort((a,b)=>a.min-b.min);
+  for(const b of sorted){ if(pct>=b.min && pct<=b.max) return b; }
+  return sorted[sorted.length-1] || {heading:'Test complete', message:'Thanks for taking the test.'};
+}
+
+/* ===================== INIT ===================== */
+(async function init(){
+  await loadDB();
+  render();
+})();
+
+/* Optional direct admin route:
+   https://YOUR-DOMAIN/admin
+   GitHub Pages SPA fallback may require a /admin/index.html or rewrite strategy.
+   Until then, the same app can be opened with ?admin=1 and the browser will render
+   the secure admin gate. */
+if(new URLSearchParams(location.search).get('admin')==='1'){
+  window.addEventListener('DOMContentLoaded',()=>setTimeout(()=>qbAdminGate(),50));
+}
+
+</script>
+</body>
+</html>
